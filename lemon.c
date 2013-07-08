@@ -1381,6 +1381,15 @@ static void handle_T_option(char *z){
   strcpy(user_templatename, z);
 }
 
+static char *user_symbolout = NULL;
+static void handle_o_option(char* z){
+  user_symbolout = (char *) malloc( lemonStrlen(z) + 1 );
+  if( user_symbolout==0 ){
+    memory_error();
+  }
+  strcpy(user_symbolout, z);
+}
+
 /* The main program.  Parse the command line and do it... */
 int main(int argc, char **argv)
 {
@@ -1398,6 +1407,7 @@ int main(int argc, char **argv)
     {OPT_FLAG, "c", (char*)&compress, "Don't compress the action table."},
     {OPT_FSTR, "D", (char*)handle_D_option, "Define an %ifdef macro."},
     {OPT_FSTR, "T", (char*)handle_T_option, "Specify a template file."},
+    {OPT_FSTR, "O", (char*)handle_o_option, "Specify the output symbol #define file."},
     {OPT_FLAG, "g", (char*)&rpflag, "Print grammar without actions."},
     {OPT_FLAG, "m", (char*)&mhflag, "Output a makeheaders compatible file."},
     {OPT_FLAG, "l", (char*)&nolinenosflag, "Do not print #line statements."},
@@ -2729,15 +2739,27 @@ PRIVATE char *file_makename(struct lemon *lemp, const char *suffix)
 PRIVATE FILE *file_open(
   struct lemon *lemp,
   const char *suffix,
-  const char *mode
+  const char *mode,
+  const char* userfile
 ){
   FILE *fp;
+  const char* filename;
 
-  if( lemp->outname ) free(lemp->outname);
-  lemp->outname = file_makename(lemp, suffix);
-  fp = fopen(lemp->outname,mode);
+  if( lemp->outname ){
+    free(lemp->outname);
+    lemp->outname = 0;
+  }
+
+  if( userfile ){
+    filename = userfile;
+  }else{
+    lemp->outname = file_makename(lemp, suffix);
+    filename = lemp->outname;
+  }
+
+  fp = fopen(filename,mode);
   if( fp==0 && *mode=='w' ){
-    fprintf(stderr,"Can't open file \"%s\".\n",lemp->outname);
+    fprintf(stderr,"Can't open file \"%s\".\n",filename);
     lemp->errorcnt++;
     return 0;
   }
@@ -2906,7 +2928,7 @@ void ReportOutput(struct lemon *lemp)
   struct action *ap;
   FILE *fp;
 
-  fp = file_open(lemp,".out","wb");
+  fp = file_open(lemp,".out","wb",NULL);
   if( fp==0 ) return;
   for(i=0; i<lemp->nstate; i++){
     stp = lemp->sorted[i];
@@ -3584,7 +3606,7 @@ void ReportTable(
 
   in = tplt_open(lemp);
   if( in==0 ) return;
-  out = file_open(lemp,".c","wb");
+  out = stdout;
   if( out==0 ){
     fclose(in);
     return;
@@ -4004,36 +4026,20 @@ void ReportTable(
   tplt_print(out,lemp,lemp->extracode,&lineno);
 
   fclose(in);
-  fclose(out);
   return;
 }
 
 /* Generate a header file for the parser */
 void ReportHeader(struct lemon *lemp)
 {
-  FILE *out, *in;
+  FILE *out;
   const char *prefix;
-  char line[LINESIZE];
-  char pattern[LINESIZE];
   int i;
 
   if( lemp->tokenprefix ) prefix = lemp->tokenprefix;
   else                    prefix = "";
-  in = file_open(lemp,".h","rb");
-  if( in ){
-    int nextChar;
-    for(i=1; i<lemp->nterminal && fgets(line,LINESIZE,in); i++){
-      sprintf(pattern,"#define %s%-30s %2d\n",prefix,lemp->symbols[i]->name,i);
-      if( strcmp(line,pattern) ) break;
-    }
-    nextChar = fgetc(in);
-    fclose(in);
-    if( i==lemp->nterminal && nextChar==EOF ){
-      /* No change in the file.  Don't rewrite it. */
-      return;
-    }
-  }
-  out = file_open(lemp,".h","wb");
+
+  out = file_open(lemp,".h","wb",user_symbolout);
   if( out ){
     for(i=1; i<lemp->nterminal; i++){
       fprintf(out,"#define %s%-30s %2d\n",prefix,lemp->symbols[i]->name,i);
